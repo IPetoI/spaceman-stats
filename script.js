@@ -6,13 +6,12 @@ if (args.length === 0) {
     process.exit(1);
 }
 
-const fileName = args[0]
+const fileName = args[0];
 let date = "unknown";
 if (fileName.endsWith(".json")) {
-    date = fileName.slice(0, -5); // Remove the last 5 characters
+    date = fileName.slice(0, -5);
 }
 
-// Read the JSON file
 fs.readFile(`./statisticHistory/${fileName}`, 'utf8', (err, data) => {
     if (err) {
         console.error('Error reading the file:', err);
@@ -22,93 +21,75 @@ fs.readFile(`./statisticHistory/${fileName}`, 'utf8', (err, data) => {
     const jsonData = JSON.parse(data);
     const history = jsonData.history;
 
-    // Extract gameResult values and corresponding indices
     const gameResults = history.map(entry => parseFloat(entry.gameResult));
-    const gameIds = history.map((_, index) => index + 1); // Use game indices as X-axis
+    const gameIds = history.map((_, index) => index + 1);
 
-    // Highlight points where gameResult < 2.0
-    const pointColors = gameResults.map(value => (value < 2.0 ? 'red' : 'rgba(75, 192, 192, 1)'));
+    // Calculate stats
+    const sum = gameResults.reduce((accumulator, currentValue) => {
+        return accumulator + currentValue;
+    }, 0)
+    const avg = sum / gameResults.length
 
-    // Count sequences where gameResult < 2.0 for more than 7 times in a row
-    let sequenceCount = 0;
-    let currentStreak = 0;
+    const sortedResults = [...gameResults];
+    sortedResults.sort((a, b) => a - b)
+    const median = sortedResults[Math.round(sortedResults.length/2)]
 
-    gameResults.forEach(value => {
-        if (value < 2.0) {
-            currentStreak++;
-        } else {
-            if (currentStreak > 7) {
-                sequenceCount++;
-            }
-            currentStreak = 0;
-        }
-    });
+    // ------------------------------------------------------------------------------------------------
 
-    // Check if the last streak should be counted
-    if (currentStreak > 7) {
-        sequenceCount++;
-    }
+    const startingMoney = 20000;
+    //const cashout = (median - 0.2).toFixed(2);
+    const cashout = 1.5;
+    var multiplier = 5
+    var bet = 100;
+    var losingRound = 3200 + 1600 + 800 + 400 + 200 + 100;
+    var winList = [];
+    var loseList = [];
+    var moreThanList = [];
 
-    function calculateWins(numbers) {
-        let count = 0;
-        for (let i = 2; i < numbers.length; i++) {
-            if (numbers[i] > 2.0 && numbers[i - 1] < 2.0 && numbers[i - 2] < 2.0) {
-                count++;
-            }
-        }
-        return count;
-    }
+    // kellene 1 bot ami ez alapjan csinalja, orankent felugro ablak hogy ott vagy a gepnel, egyeb hibauzenetek kezelese amit dob a spaceman
 
-    const wins = calculateWins(gameResults);
+    // ------------------------------------------------------------------------------------------------
+
+    const pointColors = gameResults.map(value => (value < cashout ? 'red' : 'rgba(75, 192, 192, 1)'));
 
     function spacemanGameSimulation(multiplierArray, startingMoney, autoCashoutMultiplier) {
         let money = startingMoney;
-        let bet = 200; // Initial bet amount
-        let maxDoubling = 5; // Max times we can double the bet
-        let consecutiveLosses = 0; // Track the number of consecutive losses
-    
-        for (let i = 2; i < multiplierArray.length; i++) {
-            const lastMultiplier1 = multiplierArray[i - 1];
-            const lastMultiplier2 = multiplierArray[i - 2];
+        let multi = multiplier + 3;
+
+        for (let i = multi; i <= multiplierArray.length; i++) {
+            const lastMultipliers = multiplierArray.slice(i - multi, i).reverse();
             const currentMultiplier = multiplierArray[i];
-    
-            // Check if we should bet based on the last two multipliers
-            if (lastMultiplier1 < 2.0 && lastMultiplier2 < 2.0) {
-                if (money < bet) {
-                    console.log("Not enough money to bet. Game over.");
-                    break;
-                }
-    
-                // Place the bet
-                money -= bet;
-    
-                if (currentMultiplier >= autoCashoutMultiplier) {
-                    // Win: Multiply bet by the autoCashoutMultiplier and add to money
-                    money += bet * autoCashoutMultiplier;
-                    consecutiveLosses = 0; // Reset consecutive losses
-                    bet = 200; // Reset bet to the initial amount
-                } else {
-                    // Loss: Increment consecutive losses
-                    consecutiveLosses++;
-                    if (consecutiveLosses <= maxDoubling) {
-                        bet *= 2; // Double the bet for the next round
-                    } else {
-                        bet = 200; // Reset bet after max doubling
-                    }
+
+            if (money < bet) {
+                console.log("Not enough money to bet. Game over.");
+                break;
+            }
+
+            let winConditionMet = false;
+            for (let j = 2; j < multi; j++) {
+                if (currentMultiplier >= autoCashoutMultiplier && lastMultipliers[j] >= autoCashoutMultiplier && lastMultipliers.slice(0, j).every(m => m < autoCashoutMultiplier)) {
+                    winConditionMet = true;
                 }
             }
+
+            if (winConditionMet) {
+                money += (bet * cashout) - bet;
+                winList.push(`win: ${i + 1}`);
+            } else if (lastMultipliers.slice(0, lastMultipliers.length - 1).every(m => m < autoCashoutMultiplier) && currentMultiplier < autoCashoutMultiplier
+                        && lastMultipliers[multi - 1] >= autoCashoutMultiplier){
+                money -= losingRound;
+                loseList.push(`lose: ${i + 1}`);
+            } else if (lastMultipliers.every(m => m < autoCashoutMultiplier) && currentMultiplier < autoCashoutMultiplier){
+                moreThanList.push(`more than 8: ${i + 1}`);
+            }
         }
-    
+
         return money;
     }
 
-    // Calculate money
-    const startingMoney = 20000;
-    const cashout = 2.0;
+    const moneyWin = spacemanGameSimulation(gameResults, startingMoney, cashout);
+    const profit = moneyWin - startingMoney;
 
-    const moneyWin = spacemanGameSimulation(gameResults, startingMoney, cashout)
-
-    // Generate HTML content with Chart.js and highlight functionality
     const htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -116,15 +97,64 @@ fs.readFile(`./statisticHistory/${fileName}`, 'utf8', (err, data) => {
     <title>Game Results Plot</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <style>
+        .scrollable {
+            max-height: 100px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+
+        .list-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .list-container .scrollable {
+            width: 30%;
+        }
+    </style>
 </head>
 <body>
     <h1>Game Results ${date}</h1>
-    <p>Number of sequences where gameResult < 2.0 for more than 7 times in a row: <strong>${sequenceCount}</strong></p>
-    <p>Number of wins: <strong>${wins}</strong></p>
-    <p>Starting with ${startingMoney} HUF, and using ${cashout}x cashout multiplier, we get <strong>${moneyWin}</strong> HUF</p>
-    <div style="width: 100%; overflow-x: auto;">
-        <canvas id="gameResultsChart" width="2000" height="400"></canvas>
+    <p>Wins: <strong>${winList.length}</strong> - Lose: <strong>${loseList.length}</strong></p>
+    <p>Starting: <strong>${startingMoney}</strong> HUF ------ Using <strong>${cashout}x</strong> cashout multiplier ------ Bet: <strong>${bet}</strong> HUF ------ 
+        Profit: <strong>${profit}</strong> ------ Avg: <strong>${avg.toFixed(1)}</strong> ------ Median: <strong>${median}</strong></p>
+
+    <!-- List container -->
+    <div class="list-container">
+        <!-- Wins List -->
+        <div class="scrollable">
+            <h3>Wins</h3>
+            <ul>
+                ${winList.map(win => `<li>${win}</li>`).join('')}
+            </ul>
+        </div>
+
+        <!-- Loses List -->
+        <div class="scrollable">
+            <h3>Loses</h3>
+            <ul>
+                ${loseList.map(lose => `<li>${lose}</li>`).join('')}
+            </ul>
+        </div>
+
+        <!-- More than 8 List -->
+        <div class="scrollable">
+            <h3>More than 8</h3>
+            <ul>
+                ${moreThanList.map(item => `<li>${item}</li>`).join('')}
+            </ul>
+        </div>
     </div>
+
+    <!-- Plot container with margin -->
+    <div id="plot-container" style="width: 100%; overflow-x: auto;">
+        <canvas id="gameResultsChart" width="2000" height="350"></canvas>
+    </div>
+
     <script>
         const ctx = document.getElementById('gameResultsChart').getContext('2d');
         const chart = new Chart(ctx, {
